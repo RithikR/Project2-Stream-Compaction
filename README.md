@@ -18,8 +18,8 @@ The project includes:
 - Work-efficient CUDA scan
 - Work-efficient CUDA stream compaction
 - Thrust exclusive scan
-- Optimized work-efficient scan with reduced inactive-thread launches
-- Extra credit GPU radix sort using the work-efficient scan
+- **Extra Credit:** Optimized work-efficient scan with reduced inactive-thread launches
+- **Extra Credit:** GPU radix sort using the work-efficient scan
 
 All scan implementations perform an exclusive prefix sum.
 
@@ -199,15 +199,13 @@ Although the work-efficient algorithm performs less theoretical work than the na
 
 The scan workload itself performs relatively little computation per element, so memory access and kernel-launch overhead are important performance bottlenecks.
 
-## Work-Efficient Scan Optimization
+## Extra Credit: Work-Efficient Scan Optimization
 
 The initial work-efficient implementation launched enough threads for `N / 2` operations at every level of the up-sweep and down-sweep.
 
-At deeper tree levels, only a small fraction of those threads actually perform useful work.
+At deeper tree levels, only a small fraction of those threads actually perform useful work. Near the root of the tree, only one or two operations may remain even though the original configuration could still launch enough threads for hundreds of thousands of elements.
 
-For example, near the root of the scan tree only one or two operations may remain, while the original launch configuration could still launch enough threads for hundreds of thousands of elements.
-
-The implementation was optimized by calculating the number of active threads separately for every tree level:
+I optimized the implementation by calculating the number of active threads separately at every tree level:
 
 ```cpp
 int numThreads = n / (offset * 2);
@@ -216,9 +214,16 @@ int numBlocks = (numThreads + blockSize - 1) / blockSize;
 
 This reduces unnecessary thread and block launches as the scan progresses deeper into the tree.
 
-The optimization also allowed the implementation to correctly process large arrays such as `2^20`, while retaining support for non-power-of-two input sizes.
+For the final `2^20` benchmark:
 
-At `2^20`, the optimized work-efficient scan completed in approximately **0.398 ms**, compared with approximately **1.584 ms** for the serial CPU scan.
+| Implementation | Time (ms) |
+| --- | ---: |
+| Serial CPU | 1.583600 |
+| Work-Efficient GPU | 0.398464 |
+
+The optimized work-efficient GPU scan was approximately **3.97x faster than the serial CPU scan** for an array of 1,048,576 elements.
+
+The GPU is not faster for every input size. At smaller array sizes, kernel-launch and synchronization overhead dominate, so the serial CPU remains faster. Once the input becomes sufficiently large, the available GPU parallelism outweighs this overhead.
 
 ## Nsight Systems Analysis
 
@@ -238,7 +243,7 @@ Thrust's scan appeared through the CCCL/CUB implementation as:
 - `DeviceScanKernel`
 - `DeviceScanInitKernel`
 
-This shows that Thrust uses optimized device-scan kernels rather than explicitly launching an up-sweep and down-sweep kernel for every scan-tree level.
+This indicates that Thrust uses optimized device-scan kernels rather than explicitly launching an up-sweep and down-sweep kernel for every scan-tree level.
 
 In the complete program trace, `kernUpSweep` and `kernDownSweep` accounted for most of the recorded GPU kernel time because they are also repeatedly used by stream compaction and radix sort.
 
@@ -283,14 +288,34 @@ Output:
 [1, 2, 5, 7, 9]
 ```
 
-Correctness tests were added for both power-of-two and non-power-of-two input sizes.
+### Radix Sort Testing
 
-At `2^20`, both radix-sort tests passed:
+I added correctness tests for both power-of-two and non-power-of-two input sizes.
+
+The test procedure was:
+
+1. Generate an unsorted integer array.
+2. Copy the same input into a CPU reference array.
+3. Sort the reference array using `std::sort`.
+4. Run `StreamCompaction::Radix::sort` on the original input.
+5. Compare the GPU radix-sort output against the CPU-sorted reference.
+
+The final large-array tests used:
+
+- Power-of-two: `N = 2^20 = 1,048,576`
+- Non-power-of-two: `N = 2^20 - 3 = 1,048,573`
+
+Both tests passed:
 
 ```text
 radix sort, power-of-two:      11.6787 ms
+passed
+
 radix sort, non-power-of-two:  11.7709 ms
+passed
 ```
+
+The non-power-of-two case verifies that radix sort continues to work correctly when the underlying scan pads its intermediate storage to the next power of two.
 
 ## Test Output
 
@@ -384,6 +409,6 @@ The naive scan performs more total work than the work-efficient algorithm, but i
 
 The work-efficient implementation reduces arithmetic complexity to `O(N)`, but separate up-sweep and down-sweep kernel launches and global-memory accesses remain significant bottlenecks.
 
-Reducing the number of inactive threads at deeper scan-tree levels improved the work-efficient implementation and allowed it to scale correctly to large inputs.
+Reducing the number of inactive threads at deeper scan-tree levels improved the work-efficient implementation and produced a scan approximately **3.97x faster than the serial CPU implementation at `2^20`**.
 
 The radix-sort extension demonstrates how scan can be used as a fundamental building block for more complex parallel algorithms.
