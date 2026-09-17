@@ -42,13 +42,14 @@ namespace StreamCompaction {
             }
         }
 
-        static void scanDevice(int n, int* data) {
-            const int blockSize = 256;
-            int numThreads = n / 2;
-            int numBlocks = (numThreads + blockSize - 1) / blockSize;
+        void scanDevice(int n, int* data) {
+            const int blockSize = 512;
 
             // Up-sweep
             for (int offset = 1; offset < n; offset *= 2) {
+                int numThreads = n / (offset * 2);
+                int numBlocks = (numThreads + blockSize - 1) / blockSize;
+
                 kernUpSweep << <numBlocks, blockSize >> > (
                     n,
                     offset,
@@ -64,6 +65,9 @@ namespace StreamCompaction {
 
             // Down-sweep
             for (int offset = n / 2; offset >= 1; offset /= 2) {
+                int numThreads = n / (offset * 2);
+                int numBlocks = (numThreads + blockSize - 1) / blockSize;
+
                 kernDownSweep << <numBlocks, blockSize >> > (
                     n,
                     offset,

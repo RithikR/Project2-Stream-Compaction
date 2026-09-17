@@ -64,7 +64,7 @@ namespace StreamCompaction {
                 );
             }
 
-            const int blockSize = 256;
+            const int blockSize = 128;
             const int numBlocks =
                 (n + blockSize - 1) / blockSize;
 
